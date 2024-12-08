@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Homepage</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/jwt-decode@3.1.2/build/jwt-decode.js"></script>
+
+</head>
+<body class="bg-gray-100 container mx-auto">
+    <h1 class="text-2xl h-[100px] flex items-center justify-center">Welcome to our chatroom <span id="username" class="text-blue-500 ml-2"></span>
+      <button id="logoutButton" class="hidden mx-2 px-2 rounded-md text-red-500">⏻</button>
+    </h1>
+
+    <!-- login form -->
+
+    <div class="flex justify-center items-center h-[calc(100vh-100px)]" id="loginFormContainer">
+      <form id="loginForm" class="flex flex-col gap-2">
+        <input type="text" name="username" placeholder="Username" id="usernameInput" class="p-2 rounded-md border-2 border-gray-300">
+        <input type="password" name="password" placeholder="Password" id="passwordInput" class="p-2 rounded-md border-2 border-gray-300">
+        <button type="submit" id="loginButton" class="p-2 rounded-md bg-blue-500 text-white">Login</button>
+        <div id="loginError" class="text-red-500"></div>
+      </form>
+    </div>
+
+    <div class="hidden flex-col gap-2 h-[calc(100vh-100px)] p-4" id="chatContainer">
+      <div id="messages" class="flex flex-1 flex-col gap-2 h-full overflow-y-auto">
+      </div>
+      <form id="messageForm" class="w-full flex gap-2" >
+        <input type="text" name="message" placeholder="Message" id="messageInput" class="p-2 rounded-md border-2 border-gray-300 flex-1">
+        <button type="submit" id="sendButton" class="p-2 rounded-md bg-blue-500 text-white">Send</button>
+      </form>
+    </div>
+
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <script>
+      let token = localStorage.getItem("token");
+      let userId = localStorage.getItem("userId");
+      let username = localStorage.getItem("username");
+
+      const logoutButtonEl = document.getElementById("logoutButton");
+      const loginFormContainerEl = document.getElementById("loginFormContainer");
+      const chatContainerEl = document.getElementById("chatContainer");
+      const loginFormEl = document.getElementById("loginForm");
+      const usernameInputEl = document.getElementById("usernameInput");
+      const passwordInputEl = document.getElementById("passwordInput");
+      const loginButtonEl = document.getElementById("loginButton");
+      const usernameEl = document.getElementById("username");
+
+      const formEl = document.getElementById("messageForm");
+      const messageInputEl = document.getElementById("messageInput");
+      const sendButtonEl = document.getElementById("sendButton");
+      const messagesEl = document.getElementById("messages");
+
+      if (userId) {
+        setupChat();
+      }
+
+      logoutButtonEl.addEventListener("click", () => {
+        localStorage.removeItem("token");
+        localStorage.removeItem("userId");
+        localStorage.removeItem("username");
+        hideChat();
+      });
+
+      loginFormEl.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const loginErrorEl = document.getElementById("loginError");
+        loginErrorEl.textContent = "";
+
+        const providedUsername = usernameInputEl.value;
+        const providedPassword = passwordInputEl.value;
+
+        if (!providedUsername || !providedPassword) {
+          loginErrorEl.textContent = "Username and password are required";
+          return;
+        }
+
+        fetch("/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ username: providedUsername, password: providedPassword }),
+        }).then((res) => {
+          if (res.status === 401) {
+            throw new Error("Invalid username or password");
+          }
+
+          return res.json();
+        }).then((data) => {
+          loginErrorEl.textContent = "";
+          const serverToken = data.token;
+          const decoded = jwt_decode(serverToken);
+
+          localStorage.setItem("token", serverToken);
+          localStorage.setItem("userId", decoded.userId);
+          localStorage.setItem("username", decoded.username);
+
+          token = serverToken;
+          userId = String(decoded.userId);
+          username = String(decoded.username);
+
+          setupChat();
+        }).catch((err) => {
+          debugger
+          loginErrorEl.textContent = err.message;
+        });
+      });
+
+      function hideChat() {
+        chatContainerEl.classList.add("hidden");
+        loginFormContainerEl.classList.remove("hidden");
+        logoutButtonEl.classList.add("hidden");
+        usernameEl.textContent = "";
+        // clear messages
+        const messagesEl = document.getElementById("messages");
+        messagesEl.innerHTML = "";
+      }
+
+      function setupChat() {
+        fetchExistingMessages();
+
+        // hide login form
+        loginFormContainerEl.classList.add("hidden");
+        // show chat
+        chatContainerEl.classList.remove("hidden");
+        chatContainerEl.classList.add("flex");
+
+        usernameEl.textContent = localStorage.getItem("username");
+        logoutButtonEl.classList.remove("hidden");
+
+        const socket = io({
+          url: "http://localhost:3000",
+          auth: {
+            token: localStorage.getItem("token")
+          }
+        });
+
+        socket.on("connect_error", (error) => {
+          console.error("Connection error:", error.message);
+          // Handle connection errors (e.g., show login prompt)
+        });
+
+        socket.on("connect", () => {
+          console.log("Connected to server");
+        });
+
+        socket.on("disconnect", () => {
+          console.log("Disconnected from server");
+        });
+
+        socket.on("message", (message) => {
+          const isMyMsg = message.userId === userId;
+
+
+          // if (myMsg) {
+          //   return;
+          // } else {
+            const msgEl = document.createElement("div");
+            msgEl.textContent = message.content;
+            msgEl.classList.add("p-2", isMyMsg ? "bg-blue-500" : "bg-gray-300", "rounded-md", isMyMsg ? "text-white" : "text-black", "inline-block", "w-fit", isMyMsg ? "self-end" : "self-start", "relative", "after:content-[attr(data-time)]", "after:absolute", "after:-bottom-5", isMyMsg ? "after:right-0" : "after:left-0", "after:text-xs", "after:text-gray-500");
+            msgEl.setAttribute("data-time", message.createdAt);
+            messagesEl.appendChild(msgEl);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          // }
+        });
+
+        formEl.addEventListener("submit", (e) => {
+          e.preventDefault();
+          if (!messageInputEl.value) {
+            return;
+          }
+          socket.emit("message", messageInputEl.value);
+          // add to messages
+          // const msgEl = document.createElement("div");
+          // msgEl.textContent = messageInputEl.value;
+          // msgEl.classList.add("p-2", "bg-blue-500", "rounded-md", "text-white", "inline-block", "w-fit", "self-end", "relative", "after:content-[attr(data-time)]", "after:absolute", "after:-bottom-5", "after:right-0", "after:text-xs", "after:text-gray-500");
+          // msgEl.setAttribute("data-time", new Date().toLocaleTimeString());
+          // messagesEl.appendChild(msgEl);
+          // scroll to bottom
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+
+          // clear message input
+          messageInputEl.value = "";
+        });
+      }
+
+
+      function fetchExistingMessages() {
+        const token = localStorage.getItem("token");
+
+        fetch("/messages", {
+          headers: {
+            "Authorization": `Bearer ${token}`
+          }
+        }).then((res) => {
+          return res.json();
+        }).then((data) => {
+          data.forEach((msg) => {
+            const { message } = msg;
+            const isMyMsg = msg.userId === userId;
+
+            const msgEl = document.createElement("div");
+            msgEl.textContent = msg.content;
+            msgEl.classList.add("p-2", isMyMsg ? "bg-blue-500" : "bg-gray-300", "rounded-md", isMyMsg ? "text-white" : "text-black", "inline-block", "w-fit", isMyMsg ? "self-end" : "self-start", "relative", "after:content-[attr(data-time)]", "after:absolute", "after:-bottom-5", isMyMsg ? "after:right-0" :  "after:left-0", "after:text-xs", "after:text-gray-500");
+            msgEl.setAttribute("data-time", msg.createdAt);
+            messagesEl.appendChild(msgEl);
+          });
+        });
+      }
+    </script>
+</body>
+</html>
